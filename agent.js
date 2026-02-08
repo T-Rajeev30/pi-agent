@@ -1,18 +1,16 @@
-const shell = require("./shell");
 const connection = require("./connection");
-const shutdown = require("./shutdown");
+const recorder = require("./media/recorder");
+const config = require("./config");
 const logger = require("./logger");
+
+global.__deviceId__ = config.DEVICE_ID;
+global.__recorder__ = recorder;
 
 logger.info("====================================");
 logger.info("Pi Remote Agent v1.0");
 logger.info("====================================");
 
-shutdown();
+const ws = connection.connect();
 
-const ws = connection.connect((data) => {
-  ws.send({ type: "output", data });
-});
+global.__ws__ = ws;
 
-shell.startShell((data) => {
-  ws.send({ type: "output", data });
-});
