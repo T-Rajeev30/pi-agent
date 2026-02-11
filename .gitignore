@@ -1,3 +1,7 @@
 node_modules/
+storage/
+state/
 .env
-*.log
+*.h264
+*.mp4
+

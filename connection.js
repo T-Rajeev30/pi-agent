@@ -1,52 +1,48 @@
-// WebSocket connection logic
 const WebSocket = require("ws");
-const config = require("./config");
 const protocol = require("./protocol");
-const logger = require("./logger");
+const config = require("./config");
+const events = require("./events");
 
 let ws;
 
-function connect(onShellOutput) {
-  logger.info("Connecting to relay...");
-
+function connect() {
   ws = new WebSocket(config.RELAY);
 
   ws.on("open", () => {
-    logger.info("Connected to relay");
+    console.log("[INFO] Connected to relay");
 
     ws.send(JSON.stringify({
       type: "register",
       deviceId: config.DEVICE_ID,
-      token: config.TOKEN,
+      token: config.TOKEN
     }));
   });
 
-  ws.on("message", (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-
+  ws.on("message", (data) => {
+    const msg = JSON.parse(data.toString());
     protocol.handleMessage(msg);
   });
 
   ws.on("close", () => {
-    logger.error("Disconnected. Reconnecting...");
-    setTimeout(() => connect(onShellOutput), 3000);
+    console.warn("[WARN] Relay connection closed");
+    setTimeout(connect, 3000);
   });
 
   ws.on("error", () => {});
-
-  // expose send method
-  return {
-    send: (data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-      }
-    },
-  };
 }
 
-module.exports = { connect };
+// 🔁 EVENTS → RELAY
+events.on("upload_progress", (data) => {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "upload_progress", ...data }));
+  }
+});
+
+events.on("recording_complete", (data) => {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "recording_complete", ...data }));
+  }
+});
+
+connect();
+

@@ -1,43 +1,56 @@
-const fs = require("fs");
-const path = require("path");
 const AWS = require("aws-sdk");
+const fs = require("fs");
+const awsConfig = require("../aws.config");
 
-AWS.config.update({ region: process.env.AWS_REGION });
-
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+AWS.config.update({
+  region: awsConfig.region,
+  accessKeyId: awsConfig.accessKeyId,
+  secretAccessKey: awsConfig.secretAccessKey,
 });
 
-function uploadWithProgress(filePath, onProgress) {
-  return new Promise((resolve, reject) => {
-    const fileSize = fs.statSync(filePath).size;
-    const stream = fs.createReadStream(filePath);
+const s3 = new AWS.S3();
 
-    const key = `videos/${Date.now()}_${path.basename(filePath)}`;
+module.exports = (filePath, key, onProgress) =>
+  new Promise((resolve, reject) => {
+    console.log("📦 Upload init");
+    console.log("File:", filePath);
+    console.log("Bucket:", awsConfig.bucket);
+    console.log("Key:", key);
 
-    const upload = s3.upload({
-      Bucket: process.env.AWS_BUCKET,
-      Key: key,
-      Body: stream,
-      ContentType: "video/mp4",
-    });
+    const size = fs.statSync(filePath).size;
+    console.log("File size:", size, "bytes");
 
-    upload.on("httpUploadProgress", (evt) => {
-      const percent = Math.round((evt.loaded / fileSize) * 100);
-      onProgress?.({
-        status: "UPLOADING",
-        percent,
-        uploaded: evt.loaded,
-        total: fileSize,
-      });
+    const upload = s3.upload(
+      {
+        Bucket: awsConfig.bucket,
+        Key: key,
+        Body: fs.createReadStream(filePath),
+        ContentType: "video/mp4",
+      },
+      {
+        partSize: 5 * 1024 * 1024, // 🔴 FORCE multipart
+        queueSize: 1,
+      }
+    );
+
+    upload.on("httpUploadProgress", (p) => {
+      console.log("📡 RAW PROGRESS EVENT:", p);
+
+      if (!p.total) return;
+
+      const percent = Math.round((p.loaded / p.total) * 100);
+      console.log(`⬆️ Upload ${percent}%`);
+
+      if (onProgress) onProgress(percent);
     });
 
     upload.send((err, data) => {
-      if (err) return reject(err);
-      resolve(data.Location);
+      if (err) {
+        console.error("❌ Upload error:", err);
+        reject(err);
+      } else {
+        console.log("✅ Upload finished:", data.Location);
+        resolve(data.Location);
+      }
     });
   });
-}
-
-module.exports = { uploadWithProgress };

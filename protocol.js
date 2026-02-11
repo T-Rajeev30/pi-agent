@@ -1,41 +1,14 @@
 const recorder = require("./media/recorder");
 
-let activeScheduleId = null;
+exports.handleMessage = (msg) => {
+  if (!msg || msg.type !== "command") return;
 
-async function handleMessage(msg) {
-  // START RECORDING
-  if (msg.type === "command" && msg.action === "start_recording") {
-    activeScheduleId = msg.payload.scheduleId;
-
-    recorder.startRecording({
-      arenaId: msg.payload.arenaId,
-      startTime: msg.payload.startTime,
-      endTime: "auto",
-      profile: msg.payload.profile,
-    });
-    return;
+  if (msg.action === "start_recording") {
+    recorder.startRecording(msg.payload);
   }
 
-  // STOP RECORDING
-  if (msg.type === "command" && msg.action === "stop_recording") {
-    if (!activeScheduleId) {
-      console.error("No active scheduleId — cannot complete recording");
-      return;
-    }
-
-    const videoUrl = await recorder.stopRecording();
-
-    global.__ws__.send({
-      type: "recording_complete",
-      deviceId: global.__deviceId__,
-      scheduleId: activeScheduleId,
-      fileUrl: videoUrl,
-    });
-
-    activeScheduleId = null;
-    return;
+  if (msg.action === "stop_recording") {
+    recorder.stopRecording();
   }
-}
-
-module.exports = { handleMessage };
+};
 
