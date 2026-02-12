@@ -1,10 +1,7 @@
-.env
-node_modules/
-*.log
-*.swp
-storage/
-state/
-uploads/
-recordings/
+# ignore everything
+*
 
+# allow only these
+!agent.js
+!.gitignore
 
