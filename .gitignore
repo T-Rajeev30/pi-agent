@@ -1,0 +1,10 @@
+.env
+node_modules/
+*.log
+*.swp
+storage/
+state/
+uploads/
+recordings/
+
+
