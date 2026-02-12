@@ -1,7 +1,41 @@
-# ignore everything
-*
+# ========================
+# Dependencies
+# ========================
+node_modules/
 
-# allow only these
-!agent.js
-!.gitignore
+# ========================
+# Environment / Secrets
+# ========================
+.env
+.env.*
+
+# ========================
+# Runtime Storage
+# ========================
+storage/
+recordings/
+uploads/
+state/
+temp/
+
+# ========================
+# Video Artifacts
+# ========================
+*.h264
+*.mp4
+*.ts
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# OS / Editor Junk
+# ========================
+*.swp
+*.swo
+*~
+.DS_Store
 
