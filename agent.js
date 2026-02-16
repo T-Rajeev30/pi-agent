@@ -1,5 +1,12 @@
-require("dotenv").config();
+/**
+ * agent.js
+ *
+ * This is the main runtime process of the Raspberry Pi device.
+ * It connects to your relay server and waits for commands.
+ */
 
+
+require("dotenv").config();
 const WebSocket = require("ws");
 const recorder = require("./camera/recorder");
 
@@ -12,111 +19,74 @@ if (!RELAY_URL || !DEVICE_ID || !DEVICE_TOKEN) {
   process.exit(1);
 }
 
-let ws = null;
-let heartbeatTimer = null;
+/* ---------------- CONNECT TO RELAY ---------------- */
 
-/* ---------- SAFE SEND ---------- */
+console.log("Connecting to relay:", RELAY_URL);
+const ws = new WebSocket(RELAY_URL);
 
-function send(msg) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify(msg));
-}
+/**
+ * When socket opens → register device
+ */
+ws.on("open", () => {
+  console.log("Connected to relay");
 
-/* ---------- HEARTBEAT ---------- */
+  ws.send(JSON.stringify({
+    type: "register",
+    deviceId: DEVICE_ID,
+    token: DEVICE_TOKEN
+  }));
 
+  startHeartbeat();
+});
+/**
+ * Receive commands from backend
+ */
+ws.on("message", async raw => {
+  const msg = JSON.parse(raw.toString());
+
+  if (msg.type !== "command") return;
+
+  /* ---------- START RECORDING ---------- */
+  if (msg.action === "START" || msg.action === "start_recording" ) {
+    console.log("START command received");
+
+    ws.send(JSON.stringify({
+      type: "recording_started",
+      deviceId: DEVICE_ID
+    }));
+
+    try {
+      const url = await recorder.startRecording();
+
+      ws.send(JSON.stringify({
+        type: "recording_complete",
+        deviceId: DEVICE_ID,
+        recordingId: msg.recordingId,
+        videoUrl: url
+      }));
+
+    } catch (err) {
+      console.error("Recording failed:", err);
+    }
+  }
+
+  /* ---------- STOP RECORDING ---------- */
+  if (msg.action === "stop_recording" || msg.action === "STOP") {
+    console.log("STOP command received");
+    recorder.stopRecording();
+  }
+});
+
+/* ---------------- HEARTBEAT ---------------- */
+/**
+ * Sent every 5 seconds so backend knows device status.
+ */
 function startHeartbeat() {
-  if (heartbeatTimer) return;
-
-  heartbeatTimer = setInterval(() => {
-    send({
+  setInterval(() => {
+    ws.send(JSON.stringify({
       type: "heartbeat",
       deviceId: DEVICE_ID,
-      recording: recorder.isRecording(),
-    });
+      recording: recorder.isRecording()
+    }));
   }, 5000);
 }
-
-/* ---------- CONNECT ---------- */
-
-function connect() {
-  console.log("[PI] Connecting to relay");
-
-  ws = new WebSocket(RELAY_URL);
-
-  ws.on("open", () => {
-    console.log("[PI] Connected");
-
-    /* register device */
-    send({
-      type: "register",
-      deviceId: DEVICE_ID,
-      token: DEVICE_TOKEN,
-    });
-
-    startHeartbeat();
-  });
-
-  ws.on("message", async (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-
-    /* ---------- START RECORDING ---------- */
-
-    if (msg.type === "command" && msg.action === "start_recording") {
-      console.log("[PI] Start recording command");
-
-      send({
-        type: "recording_started",
-        deviceId: DEVICE_ID,
-      });
-
-      try {
-        const url = await recorder.startRecording(
-          msg.duration,
-          (percent) => {
-            send({
-              type: "upload_progress",
-              deviceId: DEVICE_ID,
-              percent,
-            });
-          },
-          msg.testSeconds || null,
-        );
-
-        send({
-          type: "recording_complete",
-          deviceId: DEVICE_ID,
-          recordingId: msg.recordingId,
-          videoUrl: url,
-        });
-
-      } catch (err) {
-        console.error("Recording failed:", err.message);
-      }
-    }
-
-    /* ---------- STOP RECORDING ---------- */
-
-    if (msg.type === "command" && msg.action === "stop_recording") {
-      console.log("[PI] Stop recording command");
-      recorder.stopRecording();
-    }
-  });
-
-  ws.on("close", () => {
-    console.log("[PI] Relay disconnected → retrying");
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-    setTimeout(connect, 3000);
-  });
-
-  ws.on("error", (err) => {
-    console.error("[PI] WS Error:", err.message);
-  });
-}
-
-connect();
