@@ -1,38 +1,71 @@
+/**
+ * uploader.js
+ *
+ * Uploads large video files to S3 using multipart upload.
+ * Uses the filename provided by recorder.js so naming is preserved.
+ */
+
 require("dotenv").config();
 const AWS = require("aws-sdk");
 const fs = require("fs");
+const path = require("path");
 
+/* Configure AWS */
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION
 });
 
-const s3 = new AWS.S3();
+/* Multipart upload configuration (important for long recordings) */
+const s3 = new AWS.S3({
+  partSize: 64 * 1024 * 1024, // 64MB chunks
+  queueSize: 4
+});
 
-function uploadWithProgress(filePath, key, onProgress = () => {}) {
+/**
+ * Upload file to S3
+ *
+ * @param {string} filePath  - Local file path
+ * @param {string} fileName  - Desired S3 filename
+ */
+exports.uploadLarge = (filePath, fileName) => {
+
+  /* fallback safety */
+  if (!fileName) {
+    fileName = path.basename(filePath);
+  } const key = `videos/${fileName}`;
+
+  console.log("Uploading as:", key);
+
+  const stream = fs.createReadStream(filePath);
+
   return new Promise((resolve, reject) => {
 
-    const size = fs.statSync(filePath).size;
-
-    const upload = s3.upload({
+    s3.upload({
       Bucket: process.env.AWS_BUCKET,
       Key: key,
-      Body: fs.createReadStream(filePath),
+      Body: stream,
       ContentType: "video/mp4"
-    });
-
-    upload.on("httpUploadProgress", (evt) => {
-      const percent = Math.round((evt.loaded / size) * 100);
-      process.stdout.write(`Upload ${percent}%\r`);
-      onProgress(percent);
-    });
-
-    upload.send((err, data) => {
+    })
+    .on("httpUploadProgress", progress => {
+      if (progress.total) {
+        const percent = Math.round((progress.loaded / progress.total) * 100);
+        console.log(`Upload ${percent}%`);
+      }
+    })
+    .send((err, data) => {
       if (err) return reject(err);
       resolve(data.Location);
     });
   });
-}
+};
 
-module.exports = { uploadWithProgress };
+
+
+
+
+
+
+
+
