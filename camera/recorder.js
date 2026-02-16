@@ -1,116 +1,128 @@
+/**
+ * recorder.js
+ *
+ * Controls camera recording lifecycle.
+ * Naming format:
+ * GM_DD_MM_YYYY_FROM_STARTTIME_TO_ENDTIME.mp4
+ */
+
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const convert = require("./converter");
-const { uploadWithProgress } = require("../upload/uploader");
+const { uploadLarge } = require("../upload/uploader");
 
-const STORAGE_DIR = path.join(__dirname, "../storage/temp");
+const STORAGE = path.join(__dirname, "../storage");
+if (!fs.existsSync(STORAGE)) fs.mkdirSync(STORAGE);
 
+/* recording state */
 let proc = null;
 let recording = false;
 
-/* ================= INIT ================= */
+/* time tracking */
+let startTime = null;
+let baseDate = null;
 
-if (!fs.existsSync(STORAGE_DIR)) {
-  fs.mkdirSync(STORAGE_DIR, { recursive: true });
+/* helpers */
+function pad(n) {
+  return n.toString().padStart(2, "0");
 }
 
-/* ================= START RECORDING ================= */
+function formatDate(d) {
+  return `${pad(d.getDate())}_${pad(d.getMonth() + 1)}_${d.getFullYear()}`;
+}
 
-function startRecording(durationMinutes = 60, progressCb = () => {}, testSeconds = null) {
-  if (proc) {
-    return Promise.reject(new Error("Recording already running"));
-  }
+function formatTime(d) {
+  return `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+/**
+ * Start recording (runs until STOP command)
+ */
+exports.startRecording = () => {
+  if (proc) throw new Error("Already recording");
+
+  startTime = new Date();
+  baseDate = formatDate(startTime);
+
+  const startStr = formatTime(startTime);
+
+  const h264Path = path.join(
+    STORAGE,
+    `GM_${baseDate}_FROM_${startStr}.h264`
+  );
+
+  console.log("Recording started:", h264Path);
+  recording = true;
+
+  proc = spawn("rpicam-vid", [
+    "--codec", "h264",
+    "--timeout", "0",              // unlimited recording
+
+    "--width", "1280",
+    "--height", "720",
+    "--framerate", "60",
+
+    "--bitrate", "6000000",
+    "--profile", "high",
+    "--level", "4.2",
+    "--intra", "60",
+
+    "--denoise", "off",
+    "--inline",
+    "--nopreview",
+    "-o", h264Path
+  ]);
+
+  proc.stderr.on("data", d => console.log("[CAMERA]", d.toString()));
 
   return new Promise((resolve, reject) => {
-    const ts = Date.now();
-    const base = `GM_${ts}`;
 
-    const h264 = path.join(STORAGE_DIR, `${base}.h264`);
-    const mp4 = path.join(STORAGE_DIR, `${base}.mp4`);
-
-    const timeoutMs = testSeconds
-      ? testSeconds * 1000
-      : durationMinutes * 60 * 1000;
-
-    console.log(testSeconds
-      ? `TEST MODE → ${testSeconds}s recording`
-      : `Recording ${durationMinutes} minute(s)`);
-
-    recording = true;
-
-    proc = spawn("rpicam-vid", [
-      "--codec", "h264",
-      "--inline",
-      "--nopreview",
-      "--width", "1280",
-      "--height", "720",
-      "--framerate", "60",
-      "--profile", "high",
-      "--level", "4.2",
-      "--bitrate", "6000000",
-      "--intra", "60",
-      "--denoise", "off",
-      "--timeout", timeoutMs.toString(),
-      "-o", h264
-    ]);
-
-    proc.on("error", (err) => {
+    proc.on("close", async () => {
       recording = false;
       proc = null;
-      reject(new Error("Failed to start rpicam-vid. Is camera enabled?"));
-    });
-
-    proc.on("close", async (code) => {
-      proc = null;
-      recording = false;
-
-      if (code !== 0) {
-        return reject(new Error("Recording process exited with error"));
-      }
 
       try {
-        console.log("Remux → MP4");
-        await convert(h264, mp4);
+        const endTime = new Date();
+        const endStr = formatTime(endTime);
 
-        console.log("Uploading...");
-        const url = await uploadWithProgress(
-          mp4,
-          `videos/${base}.mp4`,
-          progressCb
+        const mp4Path = path.join(
+          STORAGE,
+          `GM_${baseDate}_FROM_${formatTime(startTime)}_TO_${endStr}.mp4`
         );
 
-        fs.unlinkSync(h264);
-        fs.unlinkSync(mp4);
+        console.log("Recording stopped");
+        console.log("Final file:", mp4Path);
 
-        console.log("Upload complete:", url);
+        /* Convert raw stream to MP4 container */
+        await convert(h264Path, mp4Path);
+
+        /* Send filename explicitly to uploader */
+        const finalName = path.basename(mp4Path);
+        const url = await uploadLarge(mp4Path, finalName);
+
+        /* Cleanup temp files */
+        fs.unlinkSync(h264Path);
+        fs.unlinkSync(mp4Path);
+
         resolve(url);
-      } catch (err) {
+        } catch (err) {
         reject(err);
       }
     });
   });
-}
+};
 
-/* ================= STOP ================= */
-
-function stopRecording() {
+/**
+ * Stop recording manually
+ */
+exports.stopRecording = () => {
   if (proc) {
     console.log("Stopping recording...");
     proc.kill("SIGINT");
   }
-}
-
-/* ================= STATE ================= */
-
-function isRecording() {
-  return recording;
-}
-
-/* ================= EXPORT ================= */
-
-module.exports = {
-  startRecording,
-  stopRecording,
-  isRecording
 };
+
+/**
+ * Used for heartbeat status
+ */
+exports.isRecording = () => recording;
