@@ -34,7 +34,7 @@ exports.uploadLarge = (filePath, fileName) => {
   /* fallback safety */
   if (!fileName) {
     fileName = path.basename(filePath);
-  } const key = `videos/${fileName}`;
+  } const key = `videos/device_name/${fileName}`;
 
   console.log("Uploading as:", key);
 
