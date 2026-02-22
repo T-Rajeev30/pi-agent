@@ -1,0 +1,10 @@
+# MQTT communication
+paho-mqtt==1.6.1
+
+# AWS S3 upload
+boto3==1.34.131
+botocore==1.34.131
+s3transfer==0.10.2
+
+# HTTP support (required by boto3)
+urllib3<2.1
