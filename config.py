@@ -1,0 +1,12 @@
+DEVICE_ID = "pi-001"
+MQTT_BROKER = "13.203.194.90"
+MQTT_PORT = 1883
+
+VIDEO_DIR = "/home/pi/videos"
+
+# AWS S3
+S3_PREFIX = "videos/device_name/"
+AWS_ACCESS_KEY=""
+AWS_SECRET_KEY=""
+AWS_REGION=""
+AWS_BUCKET=""
