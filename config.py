@@ -1,11 +1,18 @@
-DEVICE_ID = "pi-001"
-MQTT_BROKER = "13.203.194.90"
-MQTT_PORT = 1883
+DEVICE_ID        = "pi-001"
+DEVICE_NAME      = "Court Camera 1"
+MQTT_BROKER      = "13.203.194.90"
+MQTT_PORT        = 1883
+MQTT_KEEPALIVE   = 60
+VIDEO_DIR        = "/home/pi/videos"
+CAMERA_WIDTH     = 1280
+CAMERA_HEIGHT    = 720
+CAMERA_FRAMERATE = 60
+S3_PREFIX        = "videos/pi-001/"
+MIN_FREE_DISK_MB = 500
+S3_CHUNK_SIZE    = 8 * 1024 * 1024
+HEARTBEAT_INTERVAL = 5
 
-VIDEO_DIR = "/home/pi/videos"
 
-# AWS S3
-S3_PREFIX = "videos/device_name/"
 AWS_ACCESS_KEY=""
 AWS_SECRET_KEY=""
 AWS_REGION=""
