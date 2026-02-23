@@ -1,123 +1,99 @@
-import time
-import os
-import socket
+import json, logging, os, signal, sys, threading, time
 import paho.mqtt.client as mqtt
+import recorder
+from config import DEVICE_ID, DEVICE_NAME, HEARTBEAT_INTERVAL, MQTT_BROKER, MQTT_KEEPALIVE, MQTT_PORT
 
-from config import DEVICE_ID, MQTT_BROKER, MQTT_PORT
-from recorder import start_recording, stop_recording, is_recording
-from converter import convert_to_mp4
-from uploader import upload_large
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s",
+                    handlers=[logging.StreamHandler(sys.stdout)])
+log = logging.getLogger(__name__)
 
-raw_file = None
+_mqtt_client = None
+_heartbeat_failures = 0
+_MAX_HB_FAILURES = 3
 
-
-# =============================
-# MQTT PUBLISH
-# =============================
-def publish(topic, msg, retain=False):
-    try:
-        client.publish(topic, msg, retain=retain)
-    except Exception as e:
-        print("Publish error:", e)
-
-
-# =============================
-# MQTT CALLBACKS
-# =============================
-def on_connect(client, userdata, flags, reasonCode, properties=None):
-    print("Connected to MQTT →", reasonCode)
-
-    client.subscribe(f"pi/{DEVICE_ID}/command")
-
-    publish(f"pi/{DEVICE_ID}/status", "online", True)
-
-    if is_recording():
-        publish(f"pi/{DEVICE_ID}/recording", "ON", True)
+def on_connect(client, userdata, flags, rc):
+    global _heartbeat_failures
+    if rc == 0:
+        _heartbeat_failures = 0
+        log.info(f"[MQTT] Connected to {MQTT_BROKER}")
+        client.subscribe(f"pi/{DEVICE_ID}/command", qos=1)
     else:
-        publish(f"pi/{DEVICE_ID}/recording", "OFF", True)
+        log.error(f"[MQTT] Connection failed rc={rc}")
 
+def on_disconnect(client, userdata, rc):
+    if rc != 0:
+        log.warning(f"[MQTT] Disconnected rc={rc}, reconnecting...")
 
 def on_message(client, userdata, msg):
-    global raw_file
-
-    command = msg.payload.decode().strip()
-    print("CMD:", command)
-
     try:
+        data = json.loads(msg.payload.decode())
+        command = data.get("command", "")
+        log.info(f"[MQTT] Command: {command}")
         if command == "start_recording":
-
-            if not is_recording():
-                raw_file = start_recording()
-                publish(f"pi/{DEVICE_ID}/recording", "ON", True)
-            else:
-                print("Already recording")
-
+            if recorder.is_recording():
+                return
+            recording_id = data.get("recordingId")
+            if not recording_id:
+                log.error("[MQTT] Missing recordingId")
+                return
+            recorder.start_recording(client, recording_id)
         elif command == "stop_recording":
-
-            raw = stop_recording()
-            publish(f"pi/{DEVICE_ID}/recording", "OFF", True)
-
-            if raw:
-                mp4 = convert_to_mp4(raw)
-                url = upload_large(mp4)
-                print("Uploaded:", url)
-
-        elif command == "reboot":
-            os.system("sudo reboot")
-
+            if recorder.is_recording():
+                recorder.stop_recording(client)
     except Exception as e:
-        print("Command error:", e)
+        log.exception(f"[MQTT] Error: {e}")
 
-
-def on_disconnect(client, userdata, reasonCode, properties=None):
-    print("MQTT disconnected")
-
-
-# =============================
-# MQTT CLIENT SETUP
-# =============================
-def create_client():
-    client = mqtt.Client(
-        protocol=mqtt.MQTTv311,   # prevents handshake stalls
-        transport="tcp"
-    )
-
-    # Force IPv4 & prevent Bookworm IPv6 timeout
-    client.socket_options = [(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)]
-
-    return client
-
-
-client = create_client()
-
-client.on_connect = on_connect
-client.on_message = on_message
-client.on_disconnect = on_disconnect
-
-print("Connecting to broker...")
-
-# IMPORTANT: use IP to avoid DNS/IPv6 issues
-client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
-
-client.loop_start()
-
-
-# =============================
-# HEARTBEAT LOOP
-# =============================
-try:
+def heartbeat_loop(client):
+    global _heartbeat_failures
     while True:
-        publish(f"pi/{DEVICE_ID}/heartbeat", "1")
-        time.sleep(5)
+        time.sleep(HEARTBEAT_INTERVAL)
+        try:
+            status = "recording" if recorder.is_recording() else "standby"
+            payload = json.dumps({"deviceId": DEVICE_ID, "name": DEVICE_NAME, "status": status})
+            result = client.publish(f"pi/{DEVICE_ID}/heartbeat", payload, qos=0)
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                _heartbeat_failures = 0
+            else:
+                _heartbeat_failures += 1
+        except Exception as e:
+            _heartbeat_failures += 1
+            log.error(f"[Heartbeat] Error: {e}")
+        if _heartbeat_failures >= _MAX_HB_FAILURES:
+            log.error("[Heartbeat] Too many failures, reconnecting")
+            _heartbeat_failures = 0
+            try:
+                client.reconnect()
+            except Exception as e:
+                log.error(f"[Heartbeat] Reconnect error: {e}")
 
-except KeyboardInterrupt:
-    print("Shutting down...")
+def shutdown(signum, frame):
+    log.info("[Agent] Shutting down")
+    if recorder.is_recording():
+        recorder.stop_recording(_mqtt_client)
+        time.sleep(2)
+    if _mqtt_client:
+        _mqtt_client.disconnect()
+    sys.exit(0)
 
-    publish(f"pi/{DEVICE_ID}/status", "offline", True)
-
-    client.loop_stop()
-
+def main():
+    global _mqtt_client
+    log.info(f"[Agent] Starting for device: {DEVICE_ID}")
+    client = mqtt.Client(client_id=f"pi-agent-{DEVICE_ID}", clean_session=False, protocol=mqtt.MQTTv311)
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
+    _mqtt_client = client
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
     try:
-        client.disconnect()
-    except:
-        pass
+        client.connect(MQTT_BROKER, MQTT_PORT, keepalive=MQTT_KEEPALIVE)
+    except Exception as e:
+        log.error(f"[Agent] Initial connect failed: {e}")
+    threading.Thread(target=heartbeat_loop, args=(client,), daemon=True).start()
+    client.loop_forever(retry_first_connection=True)
+
+if __name__ == "__main__":
+    main()
+
