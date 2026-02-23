@@ -29,3 +29,4 @@ def build_record_command(binary, output_path):
     ffmpeg_cmd = ["ffmpeg", "-y", "-fflags", "+genpts", "-i", "pipe:0",
                   "-c:v", "copy", "-movflags", "+faststart", output_path]
     return cam_cmd, ffmpeg_cmd
+
