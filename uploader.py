@@ -73,7 +73,7 @@ def upload_file(file_path, mqtt_client, recording_id, retry=False):
         log.info(f"[Uploader] Uploaded → {s3_url}")
 
         if DELETE_AFTER_UPLOAD:
-            os.remove(file_path)
+            #os.remove(file_path)
             log.info("[Uploader] Local file deleted")
 
         publish("completed", s3_url)
@@ -87,3 +87,5 @@ def upload_file(file_path, mqtt_client, recording_id, retry=False):
 
         publish("failed")
         return False
+
+
