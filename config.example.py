@@ -1,4 +1,4 @@
-DEVICE_ID        = "pi-003"
+DEVICE_ID        = "pi-002"
 DEVICE_NAME      = "Court Camera 1"
 MQTT_BROKER      = "13.203.194.90"
 MQTT_PORT        = 1883
@@ -28,3 +28,4 @@ AWS_ACCESS_KEY=""
 AWS_SECRET_KEY=""
 AWS_REGION=""
 AWS_BUCKET=""
+

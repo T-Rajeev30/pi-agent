@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+venv/
+env/
+config.py
+*.mp4
+*.h264
+*.pts
+videos/
+upload_queue.json
+*.log
+.DS_Store
+*.swp
