@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 __pycache__/
 *.py[cod]
 venv/
@@ -11,3 +12,11 @@ upload_queue.json
 *.log
 .DS_Store
 *.swp
+=======
+venv/
+__pycache__/
+.env
+upload_queue.json
+videos/
+*.log
+>>>>>>> c895842 (Improve recording stability, queue reliability, and device sync)

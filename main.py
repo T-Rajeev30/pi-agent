@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import json
 import logging
@@ -12,6 +14,7 @@ from upload_queue import start_retry_worker
 from config import (
     DEVICE_ID,
     DEVICE_NAME,
+    COURT_FIELD,
     HEARTBEAT_INTERVAL,
     MQTT_BROKER,
     MQTT_KEEPALIVE,
@@ -25,10 +28,12 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_mqtt_client = None
+_mqtt_client      = None
 _agent_start_time = time.time()
 
+
 # ---------------- MQTT CALLBACKS ---------------- #
+
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         log.info(f"[MQTT] Connected to {MQTT_BROKER}")
@@ -36,17 +41,19 @@ def on_connect(client, userdata, flags, reason_code, properties):
     else:
         log.error(f"[MQTT] Connection failed rc={reason_code}")
 
+
 def on_disconnect(client, userdata, flags, reason_code, properties):
     if reason_code != 0:
         log.warning("[MQTT] Unexpected disconnect. Reconnecting...")
 
+
 def on_message(client, userdata, msg):
     try:
         if msg.retain:
-            log.warning(f"[MQTT] Ignoring retained message")
+            log.warning("[MQTT] Ignoring retained message")
             return
 
-        data = json.loads(msg.payload.decode())
+        data    = json.loads(msg.payload.decode())
         command = data.get("command", "")
         log.info(f"[MQTT] Command: {command}")
 
@@ -69,26 +76,42 @@ def on_message(client, userdata, msg):
     except Exception as e:
         log.exception(f"[MQTT] Error: {e}")
 
+
 # ---------------- HEARTBEAT ---------------- #
+
 def heartbeat_loop(client):
+    """
+    Publishes device status every HEARTBEAT_INTERVAL seconds.
+
+    ✅ Status values:
+      - RECORDING  → camera is actively capturing
+      - STANDBY    → camera is idle and ready for a new recording
+                     (this includes while upload/processing runs in background)
+
+    The film_status topic handles processing/completed/failed per-recording.
+    The heartbeat only reflects whether the camera hardware is in use.
+    """
     while True:
         try:
-            status = "RECORDING" if recorder.is_recording() else "STANDBY"
+            status  = recorder.get_status()   # only ever RECORDING or STANDBY
             payload = json.dumps({
-                "deviceId": DEVICE_ID,
-                "name": DEVICE_NAME,
-                "status": status
-            })
+    "deviceId": DEVICE_ID,
+    "deviceName": DEVICE_NAME,
+    "court": COURT_FIELD,
+    "status": status
+})
             client.publish(
                 f"pi/{DEVICE_ID}/heartbeat",
                 payload,
-                retain=True
+                retain=True,
             )
         except Exception as e:
             log.error(f"[Heartbeat] error: {e}")
         time.sleep(HEARTBEAT_INTERVAL)
 
+
 # ---------------- SHUTDOWN ---------------- #
+
 def shutdown(signum, frame):
     log.info("[Agent] Shutting down")
     if recorder.is_recording():
@@ -99,7 +122,9 @@ def shutdown(signum, frame):
         _mqtt_client.disconnect()
     os._exit(0)
 
+
 # ---------------- MAIN ---------------- #
+
 def main():
     global _mqtt_client
 
@@ -112,9 +137,9 @@ def main():
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
     )
 
-    client.on_connect = on_connect
+    client.on_connect    = on_connect
     client.on_disconnect = on_disconnect
-    client.on_message = on_message
+    client.on_message    = on_message
     client.reconnect_delay_set(min_delay=1, max_delay=30)
 
     _mqtt_client = client
@@ -132,7 +157,6 @@ def main():
 
     client.loop_forever(retry_first_connection=True)
 
+
 if __name__ == "__main__":
     main()
-
-
