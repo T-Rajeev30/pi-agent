@@ -21,10 +21,20 @@ def detect_camera_binary():
 
 
 def check_disk_space():
+    if not os.path.exists(VIDEO_DIR):
+        log.warning(f"[Camera] VIDEO_DIR missing, creating: {VIDEO_DIR}")
+        os.makedirs(VIDEO_DIR, exist_ok=True)
+
     stat = os.statvfs(VIDEO_DIR)
     free_mb = (stat.f_bavail * stat.f_frsize) / (1024 * 1024)
-    log.info(f"[Camera] Free disk: {free_mb:.0f} MB")
-    return free_mb >= MIN_FREE_DISK_MB
+
+    log.info(f"[Camera] Free disk: {free_mb:.0f} MB (min required {MIN_FREE_DISK_MB})")
+
+    if free_mb < MIN_FREE_DISK_MB:
+        log.error("[Camera] Not enough disk space")
+        return False
+
+    return True
 
 
 def build_record_command(binary, output_h264):

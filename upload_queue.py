@@ -96,7 +96,7 @@ def start_retry_worker(upload_func, mqtt_client):
                         continue
 
                     success = upload_func(
-                        file_path, mqtt_client, item["recordingId"], retry=True
+                        file_path, mqtt_client, item["recordingId"]
                     )
 
                     if not success:
