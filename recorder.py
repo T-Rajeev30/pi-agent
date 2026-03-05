@@ -38,10 +38,24 @@ class CameraService:
             cmd = build_record_command(binary, output_file)
 
             try:
-                self._proc = subprocess.Popen(cmd)
+
+                self._proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+
                 self._start_time = time.time()
 
-                log.info("[CameraService] Camera process started")
+                # Wait briefly to detect startup crash
+                time.sleep(2)
+
+                if self._proc.poll() is not None:
+                    log.error("[CameraService] Camera process exited immediately")
+                    return False
+
+                log.info("[CameraService] Camera streaming started")
+
                 return True
 
             except Exception as e:
@@ -156,6 +170,7 @@ class RecordingManager:
             self._duration = duration
 
             if not self.camera.start(self._temp_file):
+                log.error("[RecordingManager] Camera failed to start")
                 self._publish_status(mqtt_client, recording_id, "failed")
                 return False
 
@@ -163,7 +178,6 @@ class RecordingManager:
 
             self._publish_status(mqtt_client, recording_id, "recording")
 
-            # auto stop thread
             threading.Thread(
                 target=self._auto_stop,
                 args=(mqtt_client,),
@@ -216,7 +230,8 @@ class RecordingManager:
             return
 
         if manual_stop:
-    	    log.info("[RecordingManager] Manual stop — processing file")
+            log.info("[RecordingManager] Manual stop — processing file")
+
         success = self.mux.convert(temp_file, final_file)
 
         if not success:
@@ -243,7 +258,6 @@ class RecordingManager:
 
             if success:
                 clear_state()
-
             else:
                 log.error("[RecordingManager] Upload failed — state preserved")
 

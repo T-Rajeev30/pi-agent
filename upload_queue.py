@@ -91,7 +91,7 @@ def start_retry_worker(upload_func, mqtt_client):
                     # the queue forever with entries for already-deleted files.
                     if not os.path.exists(file_path):
                         log.warning(
-                            f"[Queue] File no longer exists, dropping: {file_path}"
+                            f"[Queue] File missig during retry: {file_path}"
                         )
                         continue
 

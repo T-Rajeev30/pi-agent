@@ -97,9 +97,6 @@ def recover_pending_files(mqtt_client=None):
             success = upload_file(final_file, mqtt_client, recording_id)
 
             if success:
-
-                clear_state()
-
                 try:
                     os.remove(final_file)
                 except Exception:

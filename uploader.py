@@ -21,14 +21,9 @@ from upload_queue import add_to_queue
 log = logging.getLogger(__name__)
 
 
-# --------------------------------------------------
-# Upload Progress Logger
-# --------------------------------------------------
-
 class ProgressPercentage:
 
     def __init__(self, filename, logger):
-
         self._filename = filename
         self._size = float(os.path.getsize(filename))
         self._seen_so_far = 0
@@ -41,7 +36,6 @@ class ProgressPercentage:
         percentage = (self._seen_so_far / self._size) * 100
 
         if int(percentage) >= self._last_logged + 10:
-
             self._last_logged = int(percentage)
 
             self._logger.info(
@@ -50,10 +44,6 @@ class ProgressPercentage:
                 f"{self._size/1024/1024:.2f} MB)"
             )
 
-
-# --------------------------------------------------
-# Upload Function
-# --------------------------------------------------
 
 def upload_file(file_path, mqtt_client, recording_id):
 
@@ -68,28 +58,25 @@ def upload_file(file_path, mqtt_client, recording_id):
             payload["s3Url"] = s3_url
 
         try:
-
             mqtt_client.publish(
                 f"pi/{DEVICE_ID}/film_status",
                 json.dumps(payload),
                 qos=1
             )
-
         except Exception as e:
-
             log.warning(f"[Uploader] MQTT publish failed: {e}")
-
-
-    # -------- File existence check --------
 
     if not os.path.exists(file_path):
 
-        log.warning("[Uploader] File missing, skipping upload")
+        log.error("[Uploader] File missing — upload failed")
 
-        return True
+        publish("failed")
+
+        return False
 
 
     file_name = os.path.basename(file_path)
+
     s3_key = f"{S3_ROOT_FOLDER}/{DEVICE_ID}/{file_name}"
 
 
@@ -105,76 +92,54 @@ def upload_file(file_path, mqtt_client, recording_id):
         )
 
 
-        # -------- Static multipart config --------
-
-        chunk_size = S3_CHUNK_SIZE
-
         config = TransferConfig(
             multipart_threshold=S3_CHUNK_SIZE,
-            multipart_chunksize=chunk_size,
+            multipart_chunksize=S3_CHUNK_SIZE,
             max_concurrency=1,
             use_threads=False
         )
 
 
-        size_mb = os.path.getsize(file_path) / (1024 * 1024)
-
-        log.info(f"[Uploader] Upload started — size: {size_mb:.2f} MB")
-
-
         progress = ProgressPercentage(file_path, log)
 
 
-        # -------- Retry Logic --------
-
-        max_retries = 5
-
-        for attempt in range(1, max_retries + 1):
-
-            try:
-
-                s3.upload_file(
-                    file_path,
-                    AWS_BUCKET,
-                    s3_key,
-                    ExtraArgs={"ContentType": "video/mp4"},
-                    Config=config,
-                    Callback=progress
-                )
-
-                break
-
-            except Exception as e:
-
-                wait_time = 2 ** attempt
-
-                log.warning(
-                    f"[Uploader] Upload failed "
-                    f"(attempt {attempt}/{max_retries}). "
-                    f"Retrying in {wait_time}s..."
-                )
-
-                time.sleep(wait_time)
-
-                if attempt == max_retries:
-
-                    raise e
+        log.info(f"[Uploader] Upload started → {file_name}")
 
 
-        # -------- Success --------
+        s3.upload_file(
+            file_path,
+            AWS_BUCKET,
+            s3_key,
+            ExtraArgs={"ContentType": "video/mp4"},
+            Config=config,
+            Callback=progress
+        )
+
+
+        # -------------------------------
+        # VERIFY FILE EXISTS ON S3
+        # -------------------------------
+
+        log.info("[Uploader] Verifying upload on S3")
+
+        s3.head_object(Bucket=AWS_BUCKET, Key=s3_key)
+
 
         s3_url = f"https://{AWS_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
 
-        log.info(f"[Uploader] Uploaded → {s3_url}")
+        log.info(f"[Uploader] Upload verified → {s3_url}")
 
+
+        # -------------------------------
+        # SAFE DELETE
+        # -------------------------------
 
         if DELETE_AFTER_UPLOAD:
 
             try:
-
                 os.remove(file_path)
 
-                log.info("[Uploader] Local file deleted")
+                log.info("[Uploader] Local file deleted after verification")
 
             except Exception as e:
 
@@ -190,18 +155,6 @@ def upload_file(file_path, mqtt_client, recording_id):
 
         log.error(f"[Uploader] Upload failed: {e}")
 
-
-        # -------- Queue retry protection --------
-
-        if not os.path.exists(file_path):
-
-            log.warning("[Uploader] File disappeared before queue")
-
-            publish("failed")
-
-            return False
-
-
         try:
 
             add_to_queue(file_path, recording_id)
@@ -209,7 +162,6 @@ def upload_file(file_path, mqtt_client, recording_id):
         except Exception as qe:
 
             log.error(f"[Uploader] Queue add failed: {qe}")
-
 
         publish("failed")
 
