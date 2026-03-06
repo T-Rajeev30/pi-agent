@@ -1,19 +1,18 @@
 import os
 import json
-import time
 import logging
 import boto3
 from boto3.s3.transfer import TransferConfig
 
 from config import (
     AWS_ACCESS_KEY,
-    AWS_BUCKET,
-    AWS_REGION,
     AWS_SECRET_KEY,
+    AWS_REGION,
+    AWS_BUCKET,
     DEVICE_ID,
-    S3_ROOT_FOLDER,
-    S3_CHUNK_SIZE,
     DELETE_AFTER_UPLOAD,
+    S3_ROOT_FOLDER,
+    S3_CHUNK_SIZE
 )
 
 from upload_queue import add_to_queue
@@ -25,24 +24,22 @@ class ProgressPercentage:
 
     def __init__(self, filename, logger):
         self._filename = filename
+        self._logger = logger
         self._size = float(os.path.getsize(filename))
         self._seen_so_far = 0
-        self._logger = logger
-        self._last_logged = 0
 
     def __call__(self, bytes_amount):
 
         self._seen_so_far += bytes_amount
         percentage = (self._seen_so_far / self._size) * 100
 
-        if int(percentage) >= self._last_logged + 10:
-            self._last_logged = int(percentage)
+        mb_done = self._seen_so_far / (1024 * 1024)
+        mb_total = self._size / (1024 * 1024)
 
-            self._logger.info(
-                f"[Uploader] Upload progress: {percentage:.1f}% "
-                f"({self._seen_so_far/1024/1024:.2f} MB / "
-                f"{self._size/1024/1024:.2f} MB)"
-            )
+        self._logger.info(
+            f"[Uploader] Upload progress: {percentage:.1f}% "
+            f"({mb_done:.2f} MB / {mb_total:.2f} MB)"
+        )
 
 
 def upload_file(file_path, mqtt_client, recording_id):
@@ -51,32 +48,33 @@ def upload_file(file_path, mqtt_client, recording_id):
 
         payload = {
             "recordingId": recording_id,
-            "status": status,
+            "status": status
         }
 
         if s3_url:
             payload["s3Url"] = s3_url
 
         try:
+            log.info(f"[Uploader] Publishing status → {status}")
+
             mqtt_client.publish(
                 f"pi/{DEVICE_ID}/film_status",
                 json.dumps(payload),
                 qos=1
             )
+
         except Exception as e:
             log.warning(f"[Uploader] MQTT publish failed: {e}")
+
 
     if not os.path.exists(file_path):
 
         log.error("[Uploader] File missing — upload failed")
-
         publish("failed")
-
         return False
 
 
     file_name = os.path.basename(file_path)
-
     s3_key = f"{S3_ROOT_FOLDER}/{DEVICE_ID}/{file_name}"
 
 
@@ -102,7 +100,6 @@ def upload_file(file_path, mqtt_client, recording_id):
 
         progress = ProgressPercentage(file_path, log)
 
-
         log.info(f"[Uploader] Upload started → {file_name}")
 
 
@@ -116,10 +113,6 @@ def upload_file(file_path, mqtt_client, recording_id):
         )
 
 
-        # -------------------------------
-        # VERIFY FILE EXISTS ON S3
-        # -------------------------------
-
         log.info("[Uploader] Verifying upload on S3")
 
         s3.head_object(Bucket=AWS_BUCKET, Key=s3_key)
@@ -130,19 +123,13 @@ def upload_file(file_path, mqtt_client, recording_id):
         log.info(f"[Uploader] Upload verified → {s3_url}")
 
 
-        # -------------------------------
-        # SAFE DELETE
-        # -------------------------------
-
         if DELETE_AFTER_UPLOAD:
 
             try:
                 os.remove(file_path)
-
                 log.info("[Uploader] Local file deleted after verification")
 
             except Exception as e:
-
                 log.warning(f"[Uploader] File delete failed: {e}")
 
 
@@ -156,11 +143,9 @@ def upload_file(file_path, mqtt_client, recording_id):
         log.error(f"[Uploader] Upload failed: {e}")
 
         try:
-
             add_to_queue(file_path, recording_id)
 
         except Exception as qe:
-
             log.error(f"[Uploader] Queue add failed: {qe}")
 
         publish("failed")
